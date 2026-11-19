@@ -298,6 +298,17 @@ nav.tabs{background:var(--glass);box-shadow:0 12px 30px -10px rgba(44,134,204,.3
 .addcat .input{flex:1 1 9em;width:auto;font-size:15px;padding:8px 10px}
 .addcat select.input{flex:0 0 auto}
 .addcatbtn{border-style:dashed;background:transparent;color:var(--accent);margin-top:2px}
+.pp{display:grid;gap:4px;margin-top:10px}
+.ppr{display:grid;grid-template-columns:5.5em 1fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)}
+.ppr:last-child{border-bottom:0}
+.ppr>label,.ppr>span{font-size:14px;color:var(--muted)}
+.ppin{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+.ppin .input{flex:1 1 7em;max-width:11em;text-align:right;font-size:17px;padding:8px 12px}
+.ppv{display:flex;flex-direction:column;align-items:flex-end;min-width:0}
+.ppv b{font-size:18px;font-weight:600}
+.ppr.total .ppv b{font-size:24px;color:var(--fg)}
+.pphint{font-size:11px;color:var(--faint)}
+.ppin .pphint{flex-basis:100%}
 </style>
 </head><body>
 <header class="top wrap" style="padding-bottom:8px">
@@ -364,6 +375,16 @@ nav.tabs{background:var(--glass);box-shadow:0 12px 30px -10px rgba(44,134,204,.3
       </div>
       <div class="balwrap" id="mBalBar"></div>
       <div class="cardline" id="mCard" hidden></div>
+    </div>
+
+    <div class="panel" id="ppPanel" hidden>
+      <h2>エブリカ <span class="sub">チャージ式カードの残高</span></h2>
+      <div class="pp">
+        <div class="ppr"><label for="ppStart">先月残高</label><div class="ppin"><input class="input num" id="ppStart" inputmode="numeric" autocomplete="off"><span class="pphint" id="ppStartHint"></span></div></div>
+        <div class="ppr"><label for="ppCharge">今月入金</label><div class="ppin"><input class="input num" id="ppCharge" inputmode="numeric" autocomplete="off" placeholder="0"><button type="button" class="btn small" id="ppAdd">＋30,000</button></div></div>
+        <div class="ppr"><span>購入金額</span><div class="ppv"><b class="num neg" id="ppBuy">—</b><span class="pphint">支払い方法「エブリカ」の記録の合計</span></div></div>
+        <div class="ppr total"><span>今月残高</span><div class="ppv"><b class="num" id="ppEnd">—</b><span class="pphint">来月の「先月残高」に繰り越します</span></div></div>
+      </div>
     </div>
 
     <div class="panel">
@@ -555,6 +576,37 @@ function renderHome(){
   $("#yInc").textContent=yenM(yi);$("#yOut").textContent=yenM(yo);
   const yb2=$("#yBal");yb2.textContent=(yi-yo>0&&!HIDE?"+":"")+yenM(yi-yo);yb2.className="v "+(yi-yo>=0?"pos":"neg");
 }
+/* ---- エブリカ（チャージ式カード）---- */
+const PP_ID="prepaid";
+function ppMap(){return cfg().prepaid||{}}
+function ppBuy(ym){return entriesOf(ym).filter(e=>e.k==="out"&&e.m===PP_ID).reduce((t,e)=>t+e.a,0)}
+function ppFirst(){const ks=Object.keys(ppMap()).sort();return ks[0]||null}
+function ppStart(ym){
+  const p=ppMap()[ym];if(p&&typeof p.s==="number")return{v:p.s,auto:false};
+  const f=ppFirst();if(!f||ym<=f)return{v:0,auto:true,none:true};
+  return{v:ppEnd(ymAdd(ym,-1)),auto:true};
+}
+function ppEnd(ym,depth){depth=depth||0;if(depth>600)return 0;const p=ppMap()[ym]||{};
+  const st=(typeof p.s==="number")?p.s:(()=>{const f=ppFirst();return(!f||ym<=f)?0:ppEnd(ymAdd(ym,-1),depth+1)})();
+  return st+(p.c||0)-ppBuy(ym)}
+function renderPP(){
+  const has=cfg().methods.some(m=>m.id===PP_ID);const panel=$("#ppPanel");panel.hidden=!has||!S.loaded;if(panel.hidden)return;
+  const p=ppMap()[S.ym]||{};const st=ppStart(S.ym);
+  const si=$("#ppStart"),ci=$("#ppCharge");
+  if(document.activeElement!==si)si.value=HIDE?"":String(st.v);
+  if(document.activeElement!==ci)ci.value=HIDE?"":(p.c?String(p.c):"");
+  si.disabled=ci.disabled=$("#ppAdd").disabled=S.readOnly||HIDE;
+  $("#ppStartHint").textContent=st.none&&!p.s?"最初の月は残高を入れてください":st.auto?"先月の残高から自動で入っています（直すこともできます）":"手入力した金額です";
+  $("#ppBuy").textContent=yen(ppBuy(S.ym));
+  const end=ppEnd(S.ym);const eb=$("#ppEnd");eb.textContent=yen(end);eb.className="num "+(end<0?"neg":"");
+}
+function ppNum(v){const n=Number(String(v).replace(/[,，円¥\s]/g,"").replace(/[０-９]/g,d=>"０１２３４５６７８９".indexOf(d)));return Number.isFinite(n)?Math.round(n):NaN}
+function ppSave(field,val){
+  const c=cfg();const all={...(c.prepaid||{})};const cur={...(all[S.ym]||{})};
+  if(field==="s"){if(val===null)delete cur.s;else cur.s=val}else{if(!val)delete cur.c;else cur.c=val}
+  if(Object.keys(cur).length)all[S.ym]=cur;else delete all[S.ym];
+  queue(()=>saveConfig({...c,prepaid:all}));
+}
 function balanceHTML(st){
   if(!S.loaded||!st.n)return"";
   if(st.inc<=0)return`<div class="bt"><span>収支のバランス</span><span>収入を記録すると表示されます</span></div>`;
@@ -590,6 +642,7 @@ function renderMonth(){
   else{bal.textContent=yenS(st.bal);bal.className="balance num "+(st.bal>=0?"pos":"neg");}
   $("#mInc").textContent=yen(st.inc);$("#mOut").textContent=yen(st.out);
   $("#mBalBar").innerHTML=balanceHTML(st);
+  renderPP();
   const prev=stats(ymAdd(S.ym,-1));
   let cmp="";
   if(S.loaded&&st.n){
@@ -862,6 +915,9 @@ function submit(more){
 $("#prevM").onclick=()=>{S.ym=ymAdd(S.ym,-1);render()};
 $("#nextM").onclick=()=>{S.ym=ymAdd(S.ym,1);render()};
 $("#monthLabel").onclick=()=>{S.ym=thisYM;render()};
+$("#ppStart").addEventListener("change",ev=>{const raw=ev.target.value.trim();if(raw===""){ppSave("s",null);return}const n=ppNum(raw);if(Number.isNaN(n)){toast("数字で入れてください");renderPP();return}const st=ppStart(S.ym);if(st.auto&&n===st.v)return;ppSave("s",n)});
+$("#ppCharge").addEventListener("change",ev=>{const n=ppNum(ev.target.value||0);if(Number.isNaN(n)){toast("数字で入れてください");renderPP();return}ppSave("c",n)});
+$("#ppAdd").onclick=()=>{const p=ppMap()[S.ym]||{};ppSave("c",(p.c||0)+30000);toast("30,000円の入金を足しました")};
 const goMonth=ym=>{S.ym=ym;S.year=Number(ym.slice(0,4));S.tab="month";render();window.scrollTo(0,0)};
 $("#mGrid").addEventListener("click",ev=>{const b=ev.target.closest("[data-ym]");if(b)goMonth(b.dataset.ym)});
 $("#backHome").onclick=()=>{if(S.tab==="month"){S.year=Number(S.ym.slice(0,4));S.tab="cal"}else S.tab="home";render();window.scrollTo(0,0)};
@@ -911,6 +967,7 @@ $("#catEditor").addEventListener("click",settingsClick);
 $("#methodEditor").addEventListener("click",settingsClick);
 document.addEventListener("keydown",ev=>{
   if(ev.key==="Escape"&&sheet){sheet=null;drawSheet()}
+  if(ev.key==="Enter"&&ev.target&&(ev.target.id==="ppStart"||ev.target.id==="ppCharge")){ev.preventDefault();ev.target.blur();return}
   if(ev.key==="Enter"&&ev.target&&["renameInput","addInput","mrenameInput","maddInput","newCatName"].includes(ev.target.id)){ev.preventDefault();const b=ev.target.parentElement.querySelector(".btn.primary");b&&b.click()}
 });
 
