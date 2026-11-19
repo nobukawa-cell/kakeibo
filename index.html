@@ -382,8 +382,8 @@ nav.tabs{background:var(--glass);box-shadow:0 12px 30px -10px rgba(44,134,204,.3
       <div class="pp">
         <div class="ppr"><label for="ppStart">先月残高</label><div class="ppin"><input class="input num" id="ppStart" inputmode="numeric" autocomplete="off"><span class="pphint" id="ppStartHint"></span></div></div>
         <div class="ppr"><label for="ppCharge">今月入金</label><div class="ppin"><input class="input num" id="ppCharge" inputmode="numeric" autocomplete="off" placeholder="0"><button type="button" class="btn small" id="ppAdd">＋30,000</button></div></div>
-        <div class="ppr"><span>購入金額</span><div class="ppv"><b class="num neg" id="ppBuy">—</b><span class="pphint">支払い方法「エブリカ」の記録の合計</span></div></div>
-        <div class="ppr total"><span>今月残高</span><div class="ppv"><b class="num" id="ppEnd">—</b><span class="pphint">来月の「先月残高」に繰り越します</span></div></div>
+        <div class="ppr"><span>購入金額</span><div class="ppv"><b class="num neg" id="ppBuy">—</b><span class="pphint" id="ppBuyHint">支払い方法「エブリカ」の記録の合計</span></div></div>
+        <div class="ppr total" id="ppEndRow"><span>今月残高</span><div class="ppv"><b class="num" id="ppEnd">—</b><span class="pphint">来月の「先月残高」に繰り越します</span></div></div>
       </div>
     </div>
 
@@ -579,8 +579,10 @@ function renderHome(){
 /* ---- エブリカ（チャージ式カード）---- */
 const PP_ID="prepaid";
 function ppMap(){return cfg().prepaid||{}}
-function ppBuy(ym){return entriesOf(ym).filter(e=>e.k==="out"&&e.m===PP_ID).reduce((t,e)=>t+e.a,0)}
-function ppFirst(){const ks=Object.keys(ppMap()).sort();return ks[0]||null}
+function ppRec(ym){return entriesOf(ym).filter(e=>e.k==="out"&&e.m===PP_ID).reduce((t,e)=>t+e.a,0)}
+function ppBuy(ym){const p=ppMap()[ym];return(p&&typeof p.b==="number")?p.b:ppRec(ym)}
+function ppOnly(ym){const p=ppMap()[ym];return!!p&&typeof p.b==="number"&&typeof p.s!=="number"&&!p.c}
+function ppFirst(){const ks=Object.keys(ppMap()).filter(k=>!ppOnly(k)).sort();return ks[0]||null}
 function ppStart(ym){
   const p=ppMap()[ym];if(p&&typeof p.s==="number")return{v:p.s,auto:false};
   const f=ppFirst();if(!f||ym<=f)return{v:0,auto:true,none:true};
@@ -597,7 +599,11 @@ function renderPP(){
   if(document.activeElement!==ci)ci.value=HIDE?"":(p.c?String(p.c):"");
   si.disabled=ci.disabled=$("#ppAdd").disabled=S.readOnly||HIDE;
   $("#ppStartHint").textContent=st.none&&!p.s?"最初の月は残高を入れてください":st.auto?"先月の残高から自動で入っています（直すこともできます）":"手入力した金額です";
+  const only=ppOnly(S.ym),fromX=typeof p.b==="number";
   $("#ppBuy").textContent=yen(ppBuy(S.ym));
+  $("#ppBuyHint").textContent=fromX?"エクセルの家計簿から入れた金額です":"支払い方法「エブリカ」の記録の合計";
+  if(only){si.value="";$("#ppStartHint").textContent="この月はエクセルに購入金額だけ残っていました"}
+  $("#ppEndRow").hidden=only;
   const end=ppEnd(S.ym);const eb=$("#ppEnd");eb.textContent=yen(end);eb.className="num "+(end<0?"neg":"");
 }
 function ppNum(v){const n=Number(String(v).replace(/[,，円¥\s]/g,"").replace(/[０-９]/g,d=>"０１２３４５６７８９".indexOf(d)));return Number.isFinite(n)?Math.round(n):NaN}
@@ -990,7 +996,13 @@ $("#exportJson").onclick=()=>{
 };
 $("#importFile").onchange=async ev=>{
   const f=ev.target.files[0];ev.target.value="";if(!f)return;
-  try{const d=JSON.parse(await f.text());if(!Array.isArray(d.entries)||!d.config)throw 0;
+  try{const d=JSON.parse(await f.text());
+    if(d&&d.kind==="kakeibo-prepaid"&&d.prepaid&&typeof d.prepaid==="object"){
+      const c=cfg();const all={...(c.prepaid||{}),...d.prepaid};
+      if(!c.methods.some(m=>m.id==="prepaid"))c.methods=[...c.methods,{id:"prepaid",name:"エブリカ"}];
+      S.config={...c,prepaid:all};const sn=snapshot();writeStore(sn);render();
+      toast(`エブリカの記録を${Object.keys(d.prepaid).length}か月分読み込みました（ほかの記録はそのままです）`);return}
+    if(!Array.isArray(d.entries)||!d.config)throw 0;
     const cur=readStore();writeStore({version:1,config:d.config,entries:d.entries,savedAt:Date.now(),lastBackup:cur&&cur.lastBackup||0});
     applyData(d);setStatus("");render();toast(`${d.entries.length}件の記録を読み込みました`);
   }catch(_){toast("このファイルは読み込めませんでした。書き出した家計簿のファイルを選んでください")}
